@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>シフト・家族管理アプリ</title>
   
-  <!-- Supabase SDK -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
   <style>
     :root {
       --primary: #4f46e5;
@@ -189,10 +186,23 @@
     <button onclick="showPage(5)">⑤ メモボード</button>
   </nav>
 
-  <script>
-    const SUPABASE_URL = 'https://ablicfkizczxylafrtfs.supabase.co';
-    const SUPABASE_KEY = 'sb_publishable_01wpaMvkpqgnLCVn8u4Vcw_uw_lcI8t';
-    const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  <!-- Firebase SDK Modules -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBUfquhpuk655DGhNSKxyazbTjtYNqGi1Q",
+      authDomain: "a-project-ce604.firebaseapp.com",
+      projectId: "a-project-ce604",
+      storageBucket: "a-project-ce604.firebasestorage.app",
+      messagingSenderId: "210216395945",
+      appId: "1:210216395945:web:1ea000325098dd80dff5b8",
+      measurementId: "G-DL9NPG37YM"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
 
     let tasks = [];
     let people = [];
@@ -208,53 +218,59 @@
     let isDrawing = false;
     let penColor = '#000000';
 
-    window.onload = async () => {
-      await fetchAllData();
+    // グローバル関数へのバインド
+    window.showPage = showPage;
+    window.changeMonth = changeMonth;
+    window.changePickerMonth = changePickerMonth;
+    window.addShift = addShift;
+    window.saveTask = saveTask;
+    window.deleteTask = deleteTask;
+    window.savePerson = savePerson;
+    window.deletePerson = deletePerson;
+    window.openTaskModal = openTaskModal;
+    window.closeModal = closeModal;
+    window.completeTask = completeTask;
+    window.deleteShift = deleteShift;
+    window.payOut = payOut;
+    window.setPenColor = setPenColor;
+    window.clearCanvas = clearCanvas;
+    window.addStickyNote = addStickyNote;
+    window.deleteSticky = deleteSticky;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      listenRealtime();
+      initCanvas();
+    });
+
+    // リアルタイム同期（Firestore）
+    function listenRealtime() {
+      onSnapshot(collection(db, 'tasks'), (snapshot) => {
+        tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        renderAll();
+      });
+
+      onSnapshot(collection(db, 'people'), (snapshot) => {
+        people = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        renderAll();
+      });
+
+      onSnapshot(collection(db, 'shifts'), (snapshot) => {
+        shifts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        renderAll();
+      });
+
+      onSnapshot(collection(db, 'stickies'), (snapshot) => {
+        stickies = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        renderStickies();
+      });
+    }
+
+    function renderAll() {
       renderCalendar();
       updateSelects();
       renderMiniCalendar();
       renderPayroll();
       renderMasterLists();
-      initCanvas();
-      renderStickies();
-      subscribeRealtime();
-    };
-
-    // --- Supabaseデータ取得 ---
-    async function fetchAllData() {
-      const [sRes, tRes, pRes, stRes] = await Promise.all([
-        _supabase.from('A project of my home work').select('*'),
-        _supabase.from('tasks').select('*'),
-        _supabase.from('people').select('*'),
-        _supabase.from('stickies').select('*')
-      ]);
-
-      if (sRes.data) {
-        shifts = sRes.data.map(r => ({ 
-          id: r.id, 
-          taskId: Number(r.time_slot), 
-          date: r.date, 
-          completed: r.pay > 0, 
-          worker: r.hourly_wage ? String(r.hourly_wage) : '' 
-        }));
-      }
-      if (tRes.data) tasks = tRes.data.map(r => ({ id: Number(r.id), name: r.name, desc: r.description, price: Number(r.price), color: r.color }));
-      if (pRes.data) people = pRes.data.map(r => r.name);
-      if (stRes.data) stickies = stRes.data;
-    }
-
-    // --- リアルタイム同期 ---
-    function subscribeRealtime() {
-      _supabase.channel('global-changes')
-        .on('postgres_changes', { event: '*', schema: 'public' }, async () => {
-          await fetchAllData();
-          renderCalendar();
-          updateSelects();
-          renderPayroll();
-          renderMasterLists();
-          renderStickies();
-        })
-        .subscribe();
     }
 
     function showPage(num) {
@@ -290,7 +306,7 @@
           const task = tasks.find(t => t.id === s.taskId);
           if (task) {
             const labelText = s.worker ? `${task.name} (${s.worker})` : task.name;
-            chipsHtml += `<div class="task-chip" style="background:${task.color}" onclick="openTaskModal(${s.id})">
+            chipsHtml += `<div class="task-chip" style="background:${task.color}" onclick="openTaskModal('${s.id}')">
               ${s.completed ? '✓ ' : ''}${labelText}
             </div>`;
           }
@@ -305,7 +321,7 @@
       renderCalendar();
     }
 
-    // --- モーダル（詳細・完了・削除） ---
+    // --- モーダル ---
     function openTaskModal(shiftId) {
       activeShiftId = shiftId;
       const shift = shifts.find(s => s.id === shiftId);
@@ -318,7 +334,7 @@
       document.getElementById('modal-price').innerText = `金額: ¥${task ? task.price.toLocaleString() : 0}`;
 
       const select = document.getElementById('modal-person-select');
-      select.innerHTML = people.map(p => `<option value="${p}" ${p === shift.worker ? 'selected' : ''}>${p}</option>`).join('');
+      select.innerHTML = people.map(p => `<option value="${p.name}" ${p.name === shift.worker ? 'selected' : ''}>${p.name}</option>`).join('');
 
       const actionArea = document.getElementById('modal-action-area');
       const statusArea = document.getElementById('modal-status-area');
@@ -341,21 +357,17 @@
       const worker = document.getElementById('modal-person-select').value;
       if (!worker) return alert('担当者を選択してください');
 
-      const shift = shifts.find(s => s.id === activeShiftId);
-      const task = tasks.find(t => t.id === shift.taskId);
-
-      await _supabase.from('A project of my home work').update({ pay: task ? task.price : 1, hourly_wage: worker }).eq('id', activeShiftId);
+      await updateDoc(doc(db, 'shifts', activeShiftId), {
+        completed: true,
+        worker: worker
+      });
       closeModal('task-modal');
-      await fetchAllData();
-      renderCalendar();
     }
 
     async function deleteShift() {
       if(!confirm('このシフトを削除しますか？')) return;
-      await _supabase.from('A project of my home work').delete().eq('id', activeShiftId);
+      await deleteDoc(doc(db, 'shifts', activeShiftId));
       closeModal('task-modal');
-      await fetchAllData();
-      renderCalendar();
     }
 
     // --- ② シフト追加 ---
@@ -368,7 +380,7 @@
       }
 
       const personSelect = document.getElementById('assign-person-select');
-      personSelect.innerHTML = '<option value="">指定なし（未定）</option>' + people.map(p => `<option value="${p}">${p}</option>`).join('');
+      personSelect.innerHTML = '<option value="">指定なし（未定）</option>' + people.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
     }
 
     function renderMiniCalendar() {
@@ -408,36 +420,33 @@
     }
 
     async function addShift() {
-      const taskSelectVal = document.getElementById('assign-task-select').value;
+      const taskId = document.getElementById('assign-task-select').value;
       const personName = document.getElementById('assign-person-select').value;
       
-      if (!taskSelectVal) return alert('「③ 設定」から仕事（タスク）を登録してください');
+      if (!taskId) return alert('「③ 設定」から仕事（タスク）を登録してください');
       if (selectedDates.length === 0) return alert('追加したい日付を選択してください');
 
-      const taskId = Number(taskSelectVal);
       const btn = document.getElementById('add-shift-btn');
       btn.disabled = true;
       btn.innerText = '追加中...';
 
-      const insertData = selectedDates.map(date => ({ 
-        date: date, 
-        time_slot: taskId, 
-        hourly_wage: personName || '', 
-        hours: 0, 
-        pay: 0 
-      }));
-
-      const { error } = await _supabase.from('A project of my home work').insert(insertData);
-
-      btn.disabled = false;
-      btn.innerText = '選択した日程へ追加';
-
-      if (error) {
-        alert('追加に失敗しました: ' + error.message);
-      } else {
+      try {
+        for (const date of selectedDates) {
+          await addDoc(collection(db, 'shifts'), {
+            date: date,
+            taskId: taskId,
+            worker: personName || '',
+            completed: false
+          });
+        }
         selectedDates = [];
-        await fetchAllData();
+        btn.disabled = false;
+        btn.innerText = '選択した日程へ追加';
         showPage(1);
+      } catch (err) {
+        alert('追加に失敗しました: ' + err.message);
+        btn.disabled = false;
+        btn.innerText = '選択した日程へ追加';
       }
     }
 
@@ -450,54 +459,42 @@
 
       if (!name || isNaN(price)) return alert('タスク名と金額を入力してください');
 
-      await _supabase.from('tasks').insert([{ id: Date.now(), name, description: desc, price, color }]);
+      await addDoc(collection(db, 'tasks'), { name, desc, price, color });
       document.getElementById('task-name').value = '';
       document.getElementById('task-desc').value = '';
       document.getElementById('task-price').value = '';
-      await fetchAllData();
-      renderMasterLists();
-      updateSelects();
     }
 
     async function deleteTask(id) {
       if (!confirm('このタスクを削除しますか？')) return;
-      await _supabase.from('tasks').delete().eq('id', id);
-      await fetchAllData();
-      renderMasterLists();
-      updateSelects();
+      await deleteDoc(doc(db, 'tasks', id));
     }
 
     async function savePerson() {
       const name = document.getElementById('person-name').value;
       if (!name) return alert('名前を入力してください');
 
-      await _supabase.from('people').insert([{ id: Date.now(), name }]);
+      await addDoc(collection(db, 'people'), { name });
       document.getElementById('person-name').value = '';
-      await fetchAllData();
-      renderMasterLists();
-      updateSelects();
     }
 
-    async function deletePerson(name) {
-      if (!confirm(`${name} さんを削除しますか？`)) return;
-      await _supabase.from('people').delete().eq('name', name);
-      await fetchAllData();
-      renderMasterLists();
-      updateSelects();
+    async function deletePerson(id) {
+      if (!confirm('このスタッフを削除しますか？')) return;
+      await deleteDoc(doc(db, 'people', id));
     }
 
     function renderMasterLists() {
       document.getElementById('registered-tasks-list').innerHTML = tasks.map(t => `
         <div class="list-item">
           <span><strong style="color:${t.color}">■</strong> ${t.name} (¥${t.price.toLocaleString()})</span>
-          <button class="btn-del" onclick="deleteTask(${t.id})">削除</button>
+          <button class="btn-del" onclick="deleteTask('${t.id}')">削除</button>
         </div>
       `).join('') || '<p style="font-size:11px; color:#9ca3af;">登録されたタスクはありません</p>';
 
       document.getElementById('registered-people-list').innerHTML = people.map(p => `
         <div class="list-item">
-          <span>${p}</span>
-          <button class="btn-del" onclick="deletePerson('${p}')">削除</button>
+          <span>${p.name}</span>
+          <button class="btn-del" onclick="deletePerson('${p.id}')">削除</button>
         </div>
       `).join('') || '<p style="font-size:11px; color:#9ca3af;">登録されたスタッフはありません</p>';
     }
@@ -512,8 +509,8 @@
         return;
       }
 
-      people.forEach(person => {
-        const personShifts = shifts.filter(s => s.worker === person && s.completed);
+      people.forEach(p => {
+        const personShifts = shifts.filter(s => s.worker === p.name && s.completed);
         let totalAmount = 0;
         let shiftLogsHtml = '';
 
@@ -527,29 +524,27 @@
 
         container.innerHTML += `
           <div class="card pay-card">
-            <h3>${person} さん</h3>
+            <h3>${p.name} さん</h3>
             <p style="font-size:20px; font-weight:bold; color:var(--primary); margin: 8px 0;">未払額: ¥${totalAmount.toLocaleString()}</p>
             <div>${shiftLogsHtml || '<span style="font-size:11px;color:#9ca3af;">未精算のタスクはありません</span>'}</div>
-            ${totalAmount > 0 ? `<button class="btn-main" style="background:#10b981; margin-top:10px;" onclick="payOut('${person}')">精算・リセット</button>` : ''}
+            ${totalAmount > 0 ? `<button class="btn-main" style="background:#10b981; margin-top:10px;" onclick="payOut('${p.name}')">精算・リセット</button>` : ''}
           </div>
         `;
       });
     }
 
-    async function payOut(person) {
-      if (!confirm(`${person} さんの未払分を精算完了にしますか？`)) return;
-      const completedShifts = shifts.filter(s => s.worker === person && s.completed);
+    async function payOut(personName) {
+      if (!confirm(`${personName} さんの未払分を精算完了にしますか？`)) return;
+      const completedShifts = shifts.filter(s => s.worker === personName && s.completed);
       for (const s of completedShifts) {
-        await _supabase.from('A project of my home work').delete().eq('id', s.id);
+        await deleteDoc(doc(db, 'shifts', s.id));
       }
-      await fetchAllData();
-      renderPayroll();
-      renderCalendar();
     }
 
-    // --- ⑤ 付箋 ＆ 手書きボード ---
+    // --- ⑤ メモボード ---
     function initCanvas() {
       canvas = document.getElementById('whiteboard-canvas');
+      if(!canvas) return;
       ctx = canvas.getContext('2d');
       resizeCanvas();
 
@@ -579,30 +574,27 @@
       const color = document.getElementById('sticky-color').value;
       if (!text) return alert('メッセージを入力してください');
 
-      await _supabase.from('stickies').insert([{ id: Date.now(), text, color, x: 20, y: 20 }]);
+      await addDoc(collection(db, 'stickies'), { text, color, x: 20, y: 20 });
       document.getElementById('sticky-text').value = '';
-      await fetchAllData();
-      renderStickies();
     }
 
     async function deleteSticky(id) {
-      await _supabase.from('stickies').delete().eq('id', id);
-      await fetchAllData();
-      renderStickies();
+      await deleteDoc(doc(db, 'stickies', id));
     }
 
     function renderStickies() {
       const container = document.getElementById('board-container');
+      if(!container) return;
       document.querySelectorAll('.sticky-note').forEach(el => el.remove());
 
       stickies.forEach(s => {
         const note = document.createElement('div');
         note.className = 'sticky-note';
         note.style.background = s.color;
-        note.style.left = s.x + 'px';
-        note.style.top = s.y + 'px';
+        note.style.left = (s.x || 20) + 'px';
+        note.style.top = (s.y || 20) + 'px';
         note.innerHTML = `
-          <div style="font-size:10px; text-align:right; cursor:pointer;" onclick="deleteSticky(${s.id})">✖</div>
+          <div style="font-size:10px; text-align:right; cursor:pointer;" onclick="deleteSticky('${s.id}')">✖</div>
           <div>${s.text}</div>
         `;
 
@@ -630,7 +622,7 @@
         const onEnd = async () => {
           if (isDragging) {
             isDragging = false;
-            await _supabase.from('stickies').update({ x: s.x, y: s.y }).eq('id', s.id);
+            await updateDoc(doc(db, 'stickies', s.id), { x: s.x, y: s.y });
           }
         };
 
