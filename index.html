@@ -78,10 +78,13 @@
   <section id="page2" class="page">
     <h2>シフトを追加</h2>
     <div class="card">
-      <label>タスク（仕事内容）を選択</label>
+      <label>1. 仕事（タスク）を選択</label>
       <select id="assign-task-select"></select>
 
-      <label>日程を選択</label>
+      <label>2. 担当スタッフを選択（任意・後から指定も可）</label>
+      <select id="assign-person-select"></select>
+
+      <label>3. 日程を選択</label>
       <div class="calendar-header" style="margin-top: 10px;">
         <button onclick="changePickerMonth(-1)">◀</button>
         <h4 id="picker-calendar-title" style="font-size:14px;"></h4>
@@ -206,7 +209,7 @@
     window.onload = async () => {
       await fetchAllData();
       renderCalendar();
-      updateTaskSelect();
+      updateSelects();
       renderMiniCalendar();
       renderPayroll();
       renderMasterLists();
@@ -236,7 +239,7 @@
         .on('postgres_changes', { event: '*', schema: 'public' }, async () => {
           await fetchAllData();
           renderCalendar();
-          updateTaskSelect();
+          updateSelects();
           renderPayroll();
           renderMasterLists();
           renderStickies();
@@ -248,7 +251,7 @@
       document.querySelectorAll('.page').forEach((p, i) => p.classList.toggle('active', i === num - 1));
       document.querySelectorAll('nav button').forEach((b, i) => b.classList.toggle('active', i === num - 1));
       if(num === 1) renderCalendar();
-      if(num === 2) { updateTaskSelect(); renderMiniCalendar(); }
+      if(num === 2) { updateSelects(); renderMiniCalendar(); }
       if(num === 3) renderMasterLists();
       if(num === 4) renderPayroll();
       if(num === 5) resizeCanvas();
@@ -276,8 +279,9 @@
         dayShifts.forEach(s => {
           const task = tasks.find(t => t.id === s.taskId);
           if (task) {
+            const labelText = s.worker ? `${task.name} (${s.worker})` : task.name;
             chipsHtml += `<div class="task-chip" style="background:${task.color}" onclick="event.stopPropagation(); openTaskModal(${s.id})">
-              ${s.completed ? '✓ ' : ''}${task.name}
+              ${s.completed ? '✓ ' : ''}${labelText}
             </div>`;
           }
         });
@@ -302,7 +306,7 @@
       document.getElementById('modal-price').innerText = `金額: ¥${task ? task.price.toLocaleString() : 0}`;
 
       const select = document.getElementById('modal-person-select');
-      select.innerHTML = people.map(p => `<option value="${p}">${p}</option>`).join('');
+      select.innerHTML = people.map(p => `<option value="${p}" ${p === shift.worker ? 'selected' : ''}>${p}</option>`).join('');
 
       const actionArea = document.getElementById('modal-action-area');
       const statusArea = document.getElementById('modal-status-area');
@@ -335,9 +339,12 @@
     }
 
     // --- シフト追加 ---
-    function updateTaskSelect() {
-      const select = document.getElementById('assign-task-select');
-      select.innerHTML = tasks.map(t => `<option value="${t.id}">${t.name} (¥${t.price})</option>`).join('');
+    function updateSelects() {
+      const taskSelect = document.getElementById('assign-task-select');
+      taskSelect.innerHTML = tasks.map(t => `<option value="${t.id}">${t.name} (¥${t.price.toLocaleString()})</option>`).join('');
+
+      const personSelect = document.getElementById('assign-person-select');
+      personSelect.innerHTML = '<option value="">指定なし（未定）</option>' + people.map(p => `<option value="${p}">${p}</option>`).join('');
     }
 
     function renderMiniCalendar() {
@@ -374,9 +381,17 @@
 
     async function addShift() {
       const taskId = parseInt(document.getElementById('assign-task-select').value);
-      if (!taskId || selectedDates.length === 0) return alert('タスクと日程を選択してください');
+      const personName = document.getElementById('assign-person-select').value;
+      
+      if (!taskId || selectedDates.length === 0) return alert('仕事（タスク）と日程を選択してください');
 
-      const insertData = selectedDates.map(date => ({ date, time_slot: String(taskId), hourly_wage: 0, hours: 0, pay: 0 }));
+      const insertData = selectedDates.map(date => ({ 
+        date, 
+        time_slot: String(taskId), 
+        hourly_wage: personName || '', 
+        hours: 0, 
+        pay: 0 
+      }));
       await _supabase.from('A project of my home work').insert(insertData);
 
       selectedDates = [];
